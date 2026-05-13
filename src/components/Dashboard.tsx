@@ -62,23 +62,28 @@ export default function Dashboard() {
     setError(null);
     try {
       const response = await axios.get(`/api/leads?region=${region}&type=${type}`);
-      const data = response.data.data?.list || [];
+      if (response.data?.error) {
+         setError(response.data.error);
+         return;
+      }
+      const data = response.data.data?.list || response.data.list || [];
       const formatted = data.map((item: any) => ({
-        id: item.id || item.creator_id || Math.random().toString().substring(2, 5),
-        name: item.nickname || item.name || 'N/A',
-        handle: item.unique_id || item.handle || 'N/A',
-        avatar: item.avatar || item.logo,
+        id: (item.id || item.creator_id || Math.random().toString().substring(2, 8)).toString(),
+        name: item.nickname || item.name || item.shop_name || 'N/A',
+        handle: item.unique_id || item.handle || item.shop_id || 'N/A',
+        avatar: item.avatar || item.logo || item.shop_logo,
         country: item.region || item.country || region,
-        followers: item.follower_count || item.fans || 0,
-        sales: item.monthly_sales || item.total_sales || 0,
-        revenue: item.monthly_revenue || item.total_revenue || 0,
-        category: item.category || 'N/A',
-        email: item.email,
+        followers: item.follower_count || item.fans || item.follower_num || 0,
+        sales: item.monthly_sales || item.total_sales || item.sales_num || 0,
+        revenue: item.monthly_revenue || item.total_revenue || item.gmv || 0,
+        category: item.category || item.main_category || 'N/A',
+        email: item.email || item.contact_email,
         engagement: item.engagement_rate
       }));
       setLeads(formatted);
     } catch (err: any) {
-      setError(err.response?.data?.error || "Error al conectar con EchoTik API.");
+      const msg = err.response?.data?.error || err.message;
+      setError(msg);
     } finally {
       setLoading(false);
     }

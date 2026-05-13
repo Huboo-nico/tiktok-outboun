@@ -1,15 +1,15 @@
 import express from "express";
 import path from "path";
 import cors from "cors";
-import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Lazily load Google libraries to avoid issues during startup/bundling
+// Lazily load libraries to avoid issues during startup/bundling or in Vercel
 let GoogleSpreadsheet: any;
 let JWT: any;
+let createViteServer: any;
 
 async function loadGoogleLibs() {
   if (!GoogleSpreadsheet || !JWT) {
@@ -37,11 +37,13 @@ async function getEchoTikToken() {
     return echotikToken;
   }
 
-  const username = process.env.ECHOTIK_USERNAME;
-  const password = process.env.ECHOTIK_PASSWORD;
+  const username = process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY;
+  const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET;
+
+  console.log(`Checking EchoTik credentials: USERNAME/KEY=${username ? username.slice(0, 4) + '...' : 'MISSING'}, PASSWORD/SECRET=${password ? 'PRESENT' : 'MISSING'}`);
 
   if (!username || !password) {
-    throw new Error("EchoTik credentials missing");
+    throw new Error(`EchoTik credentials missing. VERCEL=${process.env.VERCEL}, KEY=${!!process.env.ECHOTIK_APP_KEY}, SECRET=${!!process.env.ECHOTIK_APP_SECRET}`);
   }
 
   try {
@@ -71,32 +73,36 @@ async function getEchoTikToken() {
         console.log(`Trying EchoTik login at: ${endpoint}`);
         // EchoTik OpenAPI often requires app_key/app_secret
         // Attempting multiple payload shapes
-        const payloads = [
-          { app_key: username, app_secret: password },
-          { account: username, password: password },
-          { username, password },
-          { appKey: username, appSecret: password }
-        ];
+            const payloads = [
+              { app_key: username, app_secret: password },
+              { account: username, password: password },
+              { username, password },
+              { appKey: username, appSecret: password },
+              {} // Empty body if using headers
+            ];
 
-        let response: any = null;
-        for (const payload of payloads) {
-          try {
-            console.log(`Trying endpoint ${endpoint} with keys: ${Object.keys(payload).join(', ')}`);
-            response = await axios.post(endpoint, payload, {
-              headers: { 'Content-Type': 'application/json' },
-              timeout: 10000
-            });
-            if (response.data && response.data.data && response.data.data.token) break;
-            if (response.data && response.data.token) {
-               // Some versions return token directly
-               response.data.data = { token: response.data.token };
-               break;
+            let response: any = null;
+            for (const payload of payloads) {
+              try {
+                console.log(`Trying endpoint ${endpoint} with keys: ${Object.keys(payload).join(', ')}`);
+                response = await axios.post(endpoint, payload, {
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-echotik-app-key': username,
+                    'x-echotik-app-secret': password
+                  },
+                  timeout: 10000
+                });
+                if (response.data && response.data.data && response.data.data.token) break;
+                if (response.data && response.data.token) {
+                   response.data.data = { token: response.data.token };
+                   break;
+                }
+              } catch (e: any) {
+                 const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+                 console.log(`Payload failed for ${Object.keys(payload).join(', ')}: ${detail}`);
+              }
             }
-          } catch (e: any) {
-             const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
-             console.log(`Payload failed for ${Object.keys(payload).join(', ')}: ${detail}`);
-          }
-        }
         
         if (response && response.data && response.data.data && response.data.data.token) {
           echotikToken = response.data.data.token;
@@ -225,6 +231,10 @@ app.post("/api/sync", async (req, res) => {
   }
 });
 
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 app.get("/api/config-status", (req, res) => {
   res.json({
     echotik: !!(process.env.ECHOTIK_USERNAME && process.env.ECHOTIK_PASSWORD),
@@ -247,7 +257,8 @@ async function start() {
   console.log(`Starting server in ${isProd ? "production" : "development"} mode...`);
 
   if (!isProd) {
-    const vite = await createViteServer({
+    const { createServer } = await import("vite");
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: "spa",
       root: process.cwd(),
