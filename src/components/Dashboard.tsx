@@ -82,8 +82,8 @@ export default function Dashboard() {
       }));
       setLeads(formatted);
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.message;
-      setError(msg);
+      const msg = err.response?.data?.error || err.response?.data?.msg || err.message || 'Unknown error occurred';
+      setError(typeof msg === 'object' ? JSON.stringify(msg) : String(msg));
     } finally {
       setLoading(false);
     }
@@ -92,11 +92,15 @@ export default function Dashboard() {
   const syncLeads = async () => {
     if (leads.length === 0) return;
     setSyncing(true);
+    setError(null);
     try {
       await axios.post('/api/sync', { leads });
       alert("¡Sincronización con Google Sheets completada!");
     } catch (err: any) {
-      alert("Error al sincronizar: " + (err.response?.data?.error || err.message));
+      const msg = err.response?.data?.error || err.message || 'Sync failed';
+      const errorStr = typeof msg === 'object' ? JSON.stringify(msg) : String(msg);
+      setError(errorStr);
+      alert("Error al sincronizar: " + errorStr);
     } finally {
       setSyncing(false);
     }
