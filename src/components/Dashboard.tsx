@@ -40,7 +40,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [region, setRegion] = useState('ES');
-  const [type, setType] = useState('shop');
   const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<{ 
     echotik: boolean; 
@@ -63,7 +62,7 @@ export default function Dashboard() {
       const response = await axios.get('/api/config-status');
       setConfig(response.data);
     } catch (err) {
-      console.error("Error checking config status", err);
+      console.error("[Dashboard] Error checking config status", err);
     }
   };
 
@@ -74,12 +73,17 @@ export default function Dashboard() {
     }
     setLoading(true);
     setError(null);
+    console.log('[Dashboard] Fetching shops for region:', region);
+    
     try {
-      const response = await axios.get(`/api/leads?region=${region}&type=${type}`);
+      const response = await axios.get(`/api/leads?region=${region}&type=shop`);
+      console.log('[Dashboard] API Success Response:', response.data);
+      
       if (response.data?.error) {
          setError(response.data.error);
          return;
       }
+      
       // Refresh config for usage count
       fetchConfig();
       const data = response.data.data?.list || response.data.list || [];
@@ -98,12 +102,15 @@ export default function Dashboard() {
       }));
       setLeads(formatted);
     } catch (err: any) {
+      console.error('[Dashboard] Fetch Failed:', err);
       const respData = err.response?.data;
       const detail = respData?.detail;
       let msg = respData?.error || respData?.msg || err.message || 'Unknown error occurred';
       
       if (detail && typeof detail === 'object') {
-        msg += `\n\nDetail: ${JSON.stringify(detail.data || detail.message)}`;
+        const detailStr = JSON.stringify(detail.data || detail.message || detail);
+        msg += ` (Details in console)`;
+        console.error('[Dashboard] Error Details:', detail);
       }
       
       setError(typeof msg === 'object' ? JSON.stringify(msg) : String(msg));
@@ -132,7 +139,7 @@ export default function Dashboard() {
   useEffect(() => {
     fetchConfig();
     fetchLeads();
-  }, [region, type]);
+  }, [region]);
 
   return (
     <div className="h-screen bg-[#E4E3E0] text-[#141414] flex flex-col font-sans border-[12px] border-[#141414] overflow-hidden">
@@ -192,8 +199,8 @@ export default function Dashboard() {
         
         {/* Sidebar */}
         <aside className="w-72 border-r border-[#141414] p-6 flex flex-col gap-8 bg-[#F4F3F0]">
-          <div>
-            <p className="font-serif italic text-xs mb-4 opacity-50 uppercase tracking-widest border-b border-[#141414]/10 pb-2">Active Markets</p>
+          <div className="flex flex-col gap-1">
+            <p className="font-serif italic text-xs mb-4 opacity-50 uppercase tracking-widest border-b border-[#141414]/10 pb-2">Region Focus</p>
             <div className="flex flex-col gap-1">
               {COUNTRIES.map((c) => (
                 <button
@@ -209,24 +216,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div>
-            <p className="font-serif italic text-xs mb-4 opacity-50 uppercase tracking-widest border-b border-[#141414]/10 pb-2">Prospect Type</p>
-            <div className="grid grid-cols-2 border border-[#141414]">
-              <button
-                onClick={() => setType('shop')}
-                className={`py-2 text-[10px] font-bold uppercase border-r border-[#141414]
-                  ${type === 'shop' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-[#E4E3E0]'}`}
-              >
-                Shops
-              </button>
-              <button
-                onClick={() => setType('creator')}
-                className={`py-2 text-[10px] font-bold uppercase
-                  ${type === 'creator' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-[#E4E3E0]'}`}
-              >
-                Creators
-              </button>
-            </div>
+          <div className="p-4 border border-[#141414] bg-white space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+              <ShieldCheck className="w-3 h-3 text-green-600" />
+              Prospect Set: Shops
+            </p>
+            <p className="text-[9px] leading-relaxed opacity-60">
+              Only searching for TikTok Shop entities in the selected region.
+            </p>
           </div>
 
           {!config.googleSheets && (
@@ -259,7 +256,7 @@ export default function Dashboard() {
             <div className="font-mono text-[9px] opacity-70 leading-relaxed uppercase">
               {loading ? (
                 <>
-                  <div className="animate-pulse text-green-400">{">"} GET /API/SEARCH/{type}</div>
+                  <div className="animate-pulse text-green-400">{">"} GET /API/SEARCH/SHOP</div>
                   <div className="animate-pulse text-green-400 delay-75">{">"} AUTH_TOKEN: SUCCESS</div>
                   <div className="animate-pulse text-green-400 delay-150">{">"} FETCHING DATA...</div>
                 </>

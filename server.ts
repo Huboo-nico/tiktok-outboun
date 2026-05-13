@@ -189,45 +189,44 @@ async function syncToSheets(data: any[]) {
 app.get("/api/leads", async (req, res) => {
   try {
     if (requestCount >= MAX_REQUESTS) {
+      console.log("[SERVER] Request limit reached:", requestCount);
       return res.status(429).json({ error: "Monthly request limit reached (100/100). Please contact administrator." });
     }
 
-    const { region = "ES", type = "shop" } = req.query;
-    let token: string | null = null;
+    const { region = "ES" } = req.query;
+    console.log(`[SERVER] Fetching shop leads for region: ${region}`);
     
+    let token: string | null = null;
     try {
       token = await getEchoTikToken();
+      console.log(`[SERVER] EchoTik Token: ${token ? 'AVAILABLE' : 'NULL'}`);
     } catch (e: any) {
-      console.warn("Could not get EchoTik token, will try headers-only fallback.");
+      console.warn("[SERVER] Token acquisition warning:", e.message);
     }
     
     const username = process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983';
     const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET || '34dee8d9da1b43cab3796c55b27e8eda';
 
-    const endpoints = type === "shop" 
-      ? [
-          "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
-          "https://openapi.echotik.live/api/v1/openapi/shop/search",
-          "https://api-openapi.echotik.live/api/v1/shop/search",
-          "https://api-openapi.echotik.live/api/v1/shop/list",
-          "https://api.echotik.live/api/v1/openapi/shop/search"
-        ]
-      : [
-          "https://api-openapi.echotik.live/api/v1/openapi/creator/search",
-          "https://openapi.echotik.live/api/v1/openapi/creator/search",
-          "https://api-openapi.echotik.live/api/v1/influencer/search",
-          "https://api-openapi.echotik.live/api/v1/creator/list",
-          "https://api.echotik.live/api/v1/openapi/creator/search"
-        ];
+    const endpoints = [
+      "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
+      "https://openapi.echotik.live/api/v1/openapi/shop/search",
+      "https://api-openapi.echotik.live/api/v1/shop/search",
+      "https://api-openapi.echotik.live/api/v1/shop/list",
+      "https://api.echotik.live/api/v1/openapi/shop/search"
+    ];
 
     let lastError: any = null;
+    let success = false;
+
     for (const endpoint of endpoints) {
-      // Try both POST and GET for each endpoint as EchoTik versions vary
-      const methods = ["POST", "GET"];
+      if (success) break;
       
+      const methods = ["POST", "GET"];
       for (const method of methods) {
+        if (success) break;
+
         try {
-          console.log(`Searching EchoTik (${method}) at: ${endpoint} (Region: ${region}, Type: ${type})`);
+          console.log(`[SERVER] Attempting EchoTik Request: ${method} -> ${endpoint}`);
           const headers: any = { 
             'Content-Type': 'application/json',
             'x-echotik-app-key': username,
@@ -237,6 +236,18 @@ app.get("/api/leads", async (req, res) => {
             headers['Authorization'] = `Bearer ${token}`;
           }
 
+          const paramsPayload = { 
+            region, 
+            platform: 'TikTok', 
+            page_size: 20, 
+            pageSize: 20, 
+            page_num: 1, 
+            pageNo: 1, 
+            page_no: 1,
+            keyword: '', 
+            q: ''
+          };
+
           const requestConfig: any = {
             url: endpoint,
             method: method,
@@ -245,51 +256,31 @@ app.get("/api/leads", async (req, res) => {
           };
 
           if (method === "GET") {
-            requestConfig.params = { 
-              region, 
-              platform: 'TikTok', 
-              page_size: 20, 
-              pageSize: 20, 
-              page_num: 1, 
-              pageNo: 1, 
-              page_no: 1,
-              keyword: '', 
-              q: ''
-            };
+            requestConfig.params = paramsPayload;
           } else {
-            requestConfig.data = { 
-              region, 
-              platform: 'TikTok', 
-              page_size: 20, 
-              pageSize: 20, 
-              page_num: 1, 
-              pageNo: 1, 
-              page_no: 1,
-              keyword: '',
-              q: ''
-            };
+            requestConfig.data = paramsPayload;
           }
 
           const response = await axios(requestConfig);
+          console.log(`[SERVER] Response status ${response.status} from ${endpoint}`);
           
           if (response.data?.code !== 0 && response.data?.code !== undefined) {
-             console.warn(`API returned code ${response.data.code} on ${endpoint} (${method}):`, response.data);
-             // 40001 or similar might mean wrong parameters or method
+             console.warn(`[SERVER] API Logic Info (Code ${response.data.code}): ${response.data.msg}`);
              if (response.data?.msg === "Oops, we've got a problem, please try again later.") {
                 continue;
              }
           }
 
           if (response.data && (response.data.data || response.data.list)) {
-            requestCount++; // Increment successful request count
+            console.log(`[SERVER] Successful data extraction from ${endpoint}`);
+            requestCount++;
+            success = true;
             return res.json(response.data);
           }
         } catch (err: any) {
           lastError = err;
-          console.warn(`${method} Search failed on ${endpoint}: ${err.message}`);
-          if (err.response?.data) {
-            console.warn("Response body:", JSON.stringify(err.response.data));
-          }
+          const diag = err.response ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+          console.error(`[SERVER] Request failure on ${method} ${endpoint}: ${diag}`);
         }
       }
     }
@@ -297,13 +288,14 @@ app.get("/api/leads", async (req, res) => {
     if (lastError) {
       const errorDetail = handleLeadsError(lastError);
       return res.status(500).json({ 
-        error: "Failed to get response from EchoTik", 
+        error: "Failed to connect to EchoTik clusters. Verify credentials or check server logs.", 
         detail: errorDetail 
       });
     }
-    throw new Error("Failed to get a valid response from any EchoTik endpoint.");
+
+    res.status(500).json({ error: "No data returned from any EchoTik endpoint after exhaustive attempts." });
   } catch (error: any) {
-    console.error("Leads search failed:", error.message);
+    console.error("[SERVER] Leads search critical failure:", error.message);
     res.status(500).json({ error: error.message, detail: handleLeadsError(error) });
   }
 });
