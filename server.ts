@@ -245,11 +245,17 @@ app.get("/api/leads", async (req, res) => {
       }
     }
 
-    if (lastError) throw lastError;
+    if (lastError) {
+      const errorDetail = handleLeadsError(lastError);
+      return res.status(500).json({ 
+        error: "Failed to get response from EchoTik", 
+        detail: errorDetail 
+      });
+    }
     throw new Error("Failed to get a valid response from any EchoTik endpoint.");
   } catch (error: any) {
     console.error("Leads search failed:", error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, detail: handleLeadsError(error) });
   }
 });
 
@@ -275,11 +281,17 @@ app.get("/api/config-status", (req, res) => {
     requests: requestCount,
     maxRequests: MAX_REQUESTS
   });
-});function handleLeadsError(error: any) {
+});
+
+function handleLeadsError(error: any) {
   if (error.response) {
-    return `API Error ${error.response.status}: ${JSON.stringify(error.response.data)}`;
+    return {
+      status: error.response.status,
+      data: error.response.data,
+      message: error.message
+    };
   }
-  return error.message;
+  return { message: error.message };
 }
 
 
@@ -289,7 +301,12 @@ async function start() {
   const isProd = process.env.NODE_ENV === "production";
 
   console.log(`Starting server in ${isProd ? "production" : "development"} mode...`);
-  console.log(`Environment variables check: ECHOTIK_APP_KEY=${process.env.ECHOTIK_APP_KEY ? 'Set' : 'Missing'}, ECHOTIK_USERNAME=${process.env.ECHOTIK_USERNAME ? 'Set' : 'Missing'}`);
+  console.log(`Environment variables check:
+    ECHOTIK_APP_KEY=${process.env.ECHOTIK_APP_KEY ? 'Set (' + process.env.ECHOTIK_APP_KEY.slice(0, 3) + '...)' : 'Missing'}
+    ECHOTIK_USERNAME=${process.env.ECHOTIK_USERNAME ? 'Set (' + process.env.ECHOTIK_USERNAME.slice(0, 3) + '...)' : 'Missing'}
+    GOOGLE_SERVICE_ACCOUNT_EMAIL=${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Set (' + process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL.slice(0, 5) + '...)' : 'Missing'}
+    GOOGLE_SHEET_ID=${process.env.GOOGLE_SHEET_ID ? 'Set' : 'Missing'}
+  `);
 
   if (!isProd) {
     try {

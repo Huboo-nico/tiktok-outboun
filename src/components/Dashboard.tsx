@@ -96,7 +96,14 @@ export default function Dashboard() {
       }));
       setLeads(formatted);
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.response?.data?.msg || err.message || 'Unknown error occurred';
+      const respData = err.response?.data;
+      const detail = respData?.detail;
+      let msg = respData?.error || respData?.msg || err.message || 'Unknown error occurred';
+      
+      if (detail && typeof detail === 'object') {
+        msg += `\n\nDetail: ${JSON.stringify(detail.data || detail.message)}`;
+      }
+      
       setError(typeof msg === 'object' ? JSON.stringify(msg) : String(msg));
     } finally {
       setLoading(false);
