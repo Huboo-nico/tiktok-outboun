@@ -42,10 +42,18 @@ export default function Dashboard() {
   const [region, setRegion] = useState('ES');
   const [type, setType] = useState('shop');
   const [error, setError] = useState<string | null>(null);
-  const [config, setConfig] = useState<{ echotik: boolean; googleSheets: boolean; serviceAccountEmail: string | null }>({
+  const [config, setConfig] = useState<{ 
+    echotik: boolean; 
+    googleSheets: boolean; 
+    serviceAccountEmail: string | null;
+    requests: number;
+    maxRequests: number;
+  }>({
     echotik: false,
     googleSheets: false,
-    serviceAccountEmail: null
+    serviceAccountEmail: null,
+    requests: 0,
+    maxRequests: 100
   });
 
   const fetchConfig = async () => {
@@ -58,6 +66,10 @@ export default function Dashboard() {
   };
 
   const fetchLeads = async () => {
+    if (config.requests >= config.maxRequests) {
+      setError("Monthly limit reached (100/100). Please upgrade or contact support.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -66,6 +78,8 @@ export default function Dashboard() {
          setError(response.data.error);
          return;
       }
+      // Refresh config for usage count
+      fetchConfig();
       const data = response.data.data?.list || response.data.list || [];
       const formatted = data.map((item: any) => ({
         id: (item.id || item.creator_id || Math.random().toString().substring(2, 8)).toString(),
@@ -129,8 +143,12 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2 opacity-40">
-              <span className="text-[10px] font-bold uppercase tracking-widest">Region: {region}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Region: {region}</span>
+              <div className="h-4 w-[1px] bg-[#141414]/10 mx-2"></div>
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${config.requests > 90 ? 'text-red-500' : 'opacity-40'}`}>
+                USAGE: {config.requests}/{config.maxRequests}
+              </span>
             </div>
           </div>
         </div>
@@ -232,7 +250,10 @@ export default function Dashboard() {
               ) : (
                 <>
                   <div>{">"} SESSION ID: {Math.random().toString(36).substring(7)}</div>
-                  <div>{">"} STATUS: 200 OK</div>
+                  <div>{">"} QUOTA USED: {config.requests}/{config.maxRequests}</div>
+                  <div className={config.requests >= config.maxRequests ? 'text-red-500' : 'text-green-500'}>
+                    {">"} USAGE: {Math.round((config.requests / config.maxRequests) * 100)}%
+                  </div>
                   <div>{">"} LEADS_BUFFER: {leads.length}</div>
                   <div className="mt-2 text-green-500">{">"} IDLE / WAITING INPUT</div>
                 </>

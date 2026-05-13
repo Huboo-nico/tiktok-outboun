@@ -6,6 +6,14 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Handle unhandled Promise rejections and uncaught exceptions to prevent EPIPE/crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
 // Lazily load libraries to avoid issues during startup/bundling or in Vercel
 let GoogleSpreadsheet: any;
 let JWT: any;
@@ -25,10 +33,14 @@ async function loadGoogleLibs() {
 const app = express();
 const PORT = 3000;
 
+// Tracking usage for the 100 request limit
+let requestCount = 0;
+const MAX_REQUESTS = 100;
+
 app.use(cors());
 app.use(express.json());
 
-// --- EchoTik Service Logic --- (unchanged but using axios)
+// --- EchoTik Service Logic ---
 let echotikToken: string | null = null;
 let tokenExpiry: number = 0;
 
@@ -37,8 +49,8 @@ async function getEchoTikToken() {
     return echotikToken;
   }
 
-  const username = process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY;
-  const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET;
+  const username = process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983';
+  const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET || '34dee8d9da1b43cab3796c55b27e8eda';
 
   if (!username || !password) {
     throw new Error(`EchoTik credentials missing. ECHOTIK_APP_KEY/SECRET or ECHOTIK_USERNAME/PASSWORD needed.`);
@@ -49,7 +61,7 @@ async function getEchoTikToken() {
     console.warn(`Warning: EchoTik secret seems suspiciously short (${password.length} chars).`);
   }
 
-  console.log(`Attempting EchoTik login: USERNAME/KEY=${username.slice(0, 4)}... (Length: ${username.length}), SECRET_LENGTH=${password.length}`);
+  console.log(`Attempting EchoTik login: USERNAME/KEY=${username.slice(0, 4)}... (Length: ${username.length})`);
 
   try {
     const endpoints = [
@@ -60,65 +72,55 @@ async function getEchoTikToken() {
       "https://api.echotik.live/api/v1/openapi/auth/login",
       "https://api.echotik.live/api/v1/auth/login",
       "https://echotik.live/api/v1/openapi/auth/login",
-      "https://echotik.live/api/v1/auth/login",
-      "https://api-openapi.echotik.live/v1/openapi/auth/login",
-      "https://openapi.echotik.live/v1/openapi/auth/login"
+      "https://echotik.live/api/v1/auth/login"
     ];
 
-    let lastError: any = null;
+    let lastErrorDetails: string = "All attempts failed without specific error";
     
     for (const endpoint of endpoints) {
-      try {
-        console.log(`Trying EchoTik login at: ${endpoint}`);
-        // Attempting multiple payload shapes based on docs and common variations
-        const payloads = [
-          { app_key: username, app_secret: password },
-          { account: username, password: password },
-          { username, password },
-          { appKey: username, appSecret: password }
-        ];
+      console.log(`Trying EchoTik login at: ${endpoint}`);
+      // Attempting multiple payload shapes based on docs and common variations
+      const payloads = [
+        { app_key: username, app_secret: password },
+        { account: username, password: password },
+        { username, password },
+        { appKey: username, appSecret: password }
+      ];
 
-        let response: any = null;
-        for (const payload of payloads) {
-          try {
-            console.log(`Payload: ${JSON.stringify({ ...payload, app_secret: '***', password: '***', appSecret: '***' })}`);
-            const res = await axios.post(endpoint, payload, {
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-echotik-app-key': username,
-                'x-echotik-app-secret': password
-              },
-              timeout: 10000
-            });
-            
-            // Handle various successful response structures
-            const token = res.data?.data?.token || res.data?.token || res.data?.data?.accessToken;
-            if (token) {
-              response = res;
-              break;
-            } else {
-              console.log(`Payload failed structure for ${Object.keys(payload).join(', ')}: ${JSON.stringify(res.data).slice(0, 100)}`);
-            }
-          } catch (e: any) {
-            const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
-            console.log(`Payload error for ${Object.keys(payload).join(', ')}: ${detail}`);
+      for (const payload of payloads) {
+        try {
+          const res = await axios.post(endpoint, payload, {
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-echotik-app-key': username,
+              'x-echotik-app-secret': password
+            },
+            timeout: 10000
+          });
+          
+          const body = res.data;
+          // Handle various successful response structures
+          const token = body?.data?.token || body?.token || body?.data?.accessToken || body?.accessToken;
+          
+          if (token) {
+            echotikToken = token;
+            tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+            console.log(`Successfully logged in via: ${endpoint} with payload ${Object.keys(payload).join(', ')}`);
+            return echotikToken;
+          } else {
+            const msg = body?.msg || body?.message || "No token in response";
+            lastErrorDetails = `Endpoint ${endpoint} (${Object.keys(payload).join(', ')}): ${msg} (Code: ${body?.code})`;
+            console.log(`Payload failed for ${Object.keys(payload).join(', ')}: ${msg}`);
           }
+        } catch (e: any) {
+          const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+          lastErrorDetails = `Endpoint ${endpoint} (${Object.keys(payload).join(', ')}): ${detail}`;
+          console.log(`Payload error for ${Object.keys(payload).join(', ')}: ${detail}`);
         }
-    
-        if (response) {
-          const data = response.data.data || response.data;
-          echotikToken = data.token || data.accessToken;
-          tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
-          console.log(`Successfully logged in via: ${endpoint}`);
-          return echotikToken;
-        }
-      } catch (error: any) {
-        lastError = error;
-        console.warn(`Failed endpoint ${endpoint}: ${error.message}`);
       }
     }
     
-    throw new Error(`EchoTik login failed on all endpoints. Last error: ${lastError?.message}`);
+    throw new Error(`EchoTik login failed on all endpoints and payloads. Last attempt: ${lastErrorDetails}`);
   } catch (error: any) {
     console.error("EchoTik login failed:", error.message);
     throw error;
@@ -175,50 +177,76 @@ async function syncToSheets(data: any[]) {
 // ... rest of API routes ...
 app.get("/api/leads", async (req, res) => {
   try {
+    if (requestCount >= MAX_REQUESTS) {
+      return res.status(429).json({ error: "Monthly request limit reached (100/100). Please contact administrator." });
+    }
+
     const { region = "ES", type = "shop" } = req.query;
-    const token = await getEchoTikToken();
+    let token: string | null = null;
     
+    try {
+      token = await getEchoTikToken();
+    } catch (e: any) {
+      console.warn("Could not get EchoTik token, will try headers-only fallback.");
+    }
+    
+    const username = process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983';
+    const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET || '34dee8d9da1b43cab3796c55b27e8eda';
+
     const endpoints = type === "shop" 
       ? [
           "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
-          "https://api-openapi.echotik.live/api/v1/shop/search",
-          "https://api-openapi.echotik.live/open/v1/shop/search",
           "https://openapi.echotik.live/api/v1/openapi/shop/search",
-          "https://openapi.echotik.live/api/v1/shop/search",
-          "https://api.echotik.live/api/v1/openapi/shop/search",
-          "https://echotik.live/api/v1/openapi/shop/search",
           "https://api-openapi.echotik.live/openapi/v1/shop/search",
-          "https://openapi.echotik.live/openapi/v1/shop/search"
+          "https://openapi.echotik.live/openapi/v1/shop/search",
+          "https://api.echotik.live/api/v1/openapi/shop/search"
         ]
       : [
           "https://api-openapi.echotik.live/api/v1/openapi/creator/search",
-          "https://api-openapi.echotik.live/api/v1/creator/search",
-          "https://api-openapi.echotik.live/open/v1/creator/search",
           "https://openapi.echotik.live/api/v1/openapi/creator/search",
-          "https://openapi.echotik.live/api/v1/creator/search",
-          "https://api.echotik.live/api/v1/openapi/creator/search",
-          "https://echotik.live/api/v1/openapi/creator/search",
           "https://api-openapi.echotik.live/openapi/v1/creator/search",
-          "https://openapi.echotik.live/openapi/v1/creator/search"
+          "https://openapi.echotik.live/openapi/v1/creator/search",
+          "https://api.echotik.live/api/v1/openapi/creator/search"
         ];
 
     let lastError: any = null;
     for (const endpoint of endpoints) {
       try {
-        console.log(`Searching EchoTik at: ${endpoint}`);
+        console.log(`Searching EchoTik at: ${endpoint} (Region: ${region}, Type: ${type})`);
+        const headers: any = { 
+          'Content-Type': 'application/json',
+          'x-echotik-app-key': username,
+          'x-echotik-app-secret': password
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const response = await axios.get(endpoint, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers,
           params: { region, page_size: 20 },
           timeout: 10000
         });
-        return res.json(response.data);
+        
+        if (response.data?.code !== 0 && response.data?.code !== undefined) {
+           console.warn(`API returned non-zero code on ${endpoint}:`, response.data);
+           if (response.data?.msg === "Oops, we've got a problem, please try again later.") {
+              continue;
+           }
+        }
+
+        if (response.data && (response.data.data || response.data.list)) {
+          requestCount++; // Increment successful request count
+          return res.json(response.data);
+        }
       } catch (err: any) {
         lastError = err;
         console.warn(`Search failed on ${endpoint}: ${err.message}`);
       }
     }
 
-    throw lastError;
+    if (lastError) throw lastError;
+    throw new Error("Failed to get a valid response from any EchoTik endpoint.");
   } catch (error: any) {
     console.error("Leads search failed:", error.message);
     res.status(500).json({ error: error.message });
@@ -241,9 +269,11 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/config-status", (req, res) => {
   res.json({
-    echotik: !!(process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY) && !!(process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET),
+    echotik: !!(process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983'),
     googleSheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
-    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null
+    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
+    requests: requestCount,
+    maxRequests: MAX_REQUESTS
   });
 });function handleLeadsError(error: any) {
   if (error.response) {
