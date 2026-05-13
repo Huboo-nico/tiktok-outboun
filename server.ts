@@ -53,83 +53,48 @@ async function getEchoTikToken() {
   const password = process.env.ECHOTIK_PASSWORD || process.env.ECHOTIK_APP_SECRET || '34dee8d9da1b43cab3796c55b27e8eda';
 
   if (!username || !password) {
-    throw new Error(`EchoTik credentials missing. ECHOTIK_APP_KEY/SECRET or ECHOTIK_USERNAME/PASSWORD needed.`);
+    throw new Error(`EchoTik credentials missing.`);
   }
 
-  // Clear token if it's the trial account to ensure fresh login attempts
-  if (username === '260513461052475983' && !echotikToken) {
-    console.log("Using EchoTik Trial Account - enforcing fresh login");
-  }
+  console.log(`[SERVER] EchoTik Login Attempt: USERNAME=${username.slice(0, 4)}...`);
 
-  // Basic validation: EchoTik app secrets are typically hex strings or base64 and usually have a minimum length
-  if (password.length < 16) {
-    console.warn(`Warning: EchoTik secret seems suspiciously short (${password.length} chars).`);
-  }
+  const endpoints = [
+    "https://api-openapi.echotik.live/api/v1/openapi/auth/login",
+    "https://api-openapi.echotik.live/api/v1/auth/login",
+    "https://api.echotik.live/api/v1/openapi/auth/login"
+  ];
 
-  console.log(`Attempting EchoTik login: USERNAME/KEY=${username.slice(0, 4)}... (Length: ${username.length})`);
-
-  try {
-    const endpoints = [
-      "https://api-openapi.echotik.live/api/v1/openapi/auth/login",
-      "https://openapi.echotik.live/api/v1/openapi/auth/login",
-      "https://api-openapi.echotik.live/api/v1/auth/login",
-      "https://openapi.echotik.live/api/v1/auth/login",
-      "https://api.echotik.live/api/v1/openapi/auth/login",
-      "https://api.echotik.live/api/v1/auth/login",
-      "https://echotik.live/api/v1/openapi/auth/login",
-      "https://echotik.live/api/v1/auth/login"
+  for (const endpoint of endpoints) {
+    // Only try the two most likely payloads
+    const payloads = [
+      { app_key: username, app_secret: password },
+      { account: username, password: password }
     ];
 
-    let lastErrorDetails: string = "All attempts failed without specific error";
-    
-    for (const endpoint of endpoints) {
-      console.log(`Trying EchoTik login at: ${endpoint}`);
-      // Attempting multiple payload shapes based on docs and common variations
-      const payloads = [
-        { app_key: username, app_secret: password },
-        { account: username, password: password },
-        { username, password },
-        { appKey: username, appSecret: password }
-      ];
-
-      for (const payload of payloads) {
-        try {
-          const res = await axios.post(endpoint, payload, {
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-echotik-app-key': username,
-              'x-echotik-app-secret': password
-            },
-            timeout: 10000
-          });
-          
-          const body = res.data;
-          // Handle various successful response structures
-          const token = body?.data?.token || body?.token || body?.data?.accessToken || body?.accessToken;
-          
-          if (token) {
-            echotikToken = token;
-            tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
-            console.log(`Successfully logged in via: ${endpoint} with payload ${Object.keys(payload).join(', ')}`);
-            return echotikToken;
-          } else {
-            const msg = body?.msg || body?.message || "No token in response";
-            lastErrorDetails = `Endpoint ${endpoint} (${Object.keys(payload).join(', ')}): ${msg} (Code: ${body?.code})`;
-            console.log(`Payload failed for ${Object.keys(payload).join(', ')}: ${msg}`);
-          }
-        } catch (e: any) {
-          const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
-          lastErrorDetails = `Endpoint ${endpoint} (${Object.keys(payload).join(', ')}): ${detail}`;
-          console.log(`Payload error for ${Object.keys(payload).join(', ')}: ${detail}`);
+    for (const payload of payloads) {
+      try {
+        const res = await axios.post(endpoint, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000
+        });
+        
+        const body = res.data;
+        const token = body?.data?.token || body?.token || body?.data?.accessToken;
+        
+        if (token) {
+          echotikToken = token;
+          tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+          console.log(`[SERVER] EchoTik Login Success: ${endpoint}`);
+          return echotikToken;
         }
+      } catch (e: any) {
+        console.log(`[SERVER] Login attempt failed for ${endpoint}: ${e.message}`);
       }
     }
-    
-    throw new Error(`EchoTik login failed on all endpoints and payloads. Last attempt: ${lastErrorDetails}`);
-  } catch (error: any) {
-    console.error("EchoTik login failed:", error.message);
-    throw error;
   }
+  
+  // Return null instead of throwing to allow headers-only fallback
+  return null;
 }
 
 // --- Google Sheets Service Logic ---
@@ -349,22 +314,32 @@ function handleLeadsError(error: any) {
   return { message: error.message };
 }
 
+// Global error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('[CRITICAL SERVER ERROR]', err);
+  res.status(500).json({ 
+    error: 'Internal Server Error', 
+    message: err.message,
+    path: req.path
+  });
+});
+
 
 export default app; // Export for Vercel
 
 async function start() {
   const isProd = process.env.NODE_ENV === "production";
 
-  console.log(`Starting server in ${isProd ? "production" : "development"} mode...`);
-  console.log(`Environment variables check:
-    ECHOTIK_APP_KEY=${process.env.ECHOTIK_APP_KEY ? 'Set (' + process.env.ECHOTIK_APP_KEY.slice(0, 3) + '...)' : 'Missing'}
-    ECHOTIK_USERNAME=${process.env.ECHOTIK_USERNAME ? 'Set (' + process.env.ECHOTIK_USERNAME.slice(0, 3) + '...)' : 'Missing'}
-    GOOGLE_SERVICE_ACCOUNT_EMAIL=${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Set (' + process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL.slice(0, 5) + '...)' : 'Missing'}
-    GOOGLE_SHEET_ID=${process.env.GOOGLE_SHEET_ID ? 'Set' : 'Missing'}
-  `);
+  console.log(`[SERVER] Mode: ${isProd ? "production" : "development"}`);
+  
+  // Start listening IMMEDIATELY to avoid gateway timeouts
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`);
+  });
 
   if (!isProd) {
     try {
+      console.log("[SERVER] Initializing Vite...");
       const { createServer } = await import("vite");
       const vite = await createServer({
         server: { middlewareMode: true },
@@ -372,9 +347,9 @@ async function start() {
         root: process.cwd(),
       });
       app.use(vite.middlewares);
-      console.log("Vite middleware initialized");
+      console.log("[SERVER] Vite middleware ready");
     } catch (e: any) {
-      console.error("Failed to load Vite middleware:", e.message);
+      console.error("[SERVER] Vite initialization failed:", e.message);
     }
   } else {
     const distPath = path.join(process.cwd(), "dist");
@@ -383,10 +358,6 @@ async function start() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server listening on 0.0.0.0:${PORT}`);
-  });
 }
 
 start();

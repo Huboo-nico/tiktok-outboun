@@ -280,7 +280,7 @@ export default function Dashboard() {
           {/* Header Row */}
           <div className="grid grid-cols-[60px_1fr_80px_120px_140px_140px_180px] border-b border-[#141414] bg-[#141414]/5">
             <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414]">ID</div>
-            <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414]">Shop / Creator</div>
+            <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414]">Target Shop</div>
             <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414] text-center">Market</div>
             <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414] text-right">Followers</div>
             <div className="font-serif italic text-[11px] opacity-60 uppercase py-3 px-4 border-r border-[#141414] text-right">Est. Revenue</div>
