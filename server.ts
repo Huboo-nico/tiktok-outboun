@@ -47,36 +47,54 @@ async function getEchoTikToken() {
   try {
     const endpoints = [
       "https://api-openapi.echotik.live/api/v1/openapi/auth/login",
+      "https://openapi.echotik.live/api/v1/openapi/auth/login",
       "https://api-openapi.echotik.live/api/v1/auth/login",
-      "https://api-openapi.echotik.live/auth/login",
-      "https://api-openapi.echotik.live/open/v1/auth/login",
       "https://openapi.echotik.live/api/v1/auth/login",
       "https://api.echotik.live/api/v1/openapi/auth/login",
-      "https://openapi.echotik.live/api/v1/openapi/auth/login",
-      "https://echotik.live/api/v1/openapi/auth/login"
+      "https://echotik.live/api/v1/openapi/auth/login",
+      "https://api-openapi.echotik.live/v1/openapi/auth/login",
+      "https://openapi.echotik.live/v1/openapi/auth/login",
+      "https://api.echotik.live/openapi/v1/auth/login",
+      "https://openapi.echotik.live/openapi/v1/auth/login"
     ];
 
     let lastError: any = null;
     let failedEndpoints: string[] = [];
+    
+    // Check if credentials exist
+    if (!username || !password) {
+      throw new Error("ECHOTIK_USERNAME or ECHOTIK_PASSWORD environment variables are missing");
+    }
+
     for (const endpoint of endpoints) {
       try {
         console.log(`Trying EchoTik login at: ${endpoint}`);
-        // Try both common payload formats
+        // EchoTik OpenAPI often requires app_key/app_secret
+        // Attempting multiple payload shapes
         const payloads = [
+          { app_key: username, app_secret: password },
+          { account: username, password: password },
           { username, password },
-          { app_key: username, app_secret: password }
+          { appKey: username, appSecret: password }
         ];
 
         let response: any = null;
         for (const payload of payloads) {
           try {
+            console.log(`Trying endpoint ${endpoint} with keys: ${Object.keys(payload).join(', ')}`);
             response = await axios.post(endpoint, payload, {
               headers: { 'Content-Type': 'application/json' },
-              timeout: 5000
+              timeout: 10000
             });
             if (response.data && response.data.data && response.data.data.token) break;
-          } catch (e) {
-            // continue to next payload
+            if (response.data && response.data.token) {
+               // Some versions return token directly
+               response.data.data = { token: response.data.token };
+               break;
+            }
+          } catch (e: any) {
+             const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+             console.log(`Payload failed for ${Object.keys(payload).join(', ')}: ${detail}`);
           }
         }
         
@@ -86,8 +104,9 @@ async function getEchoTikToken() {
           console.log(`Successfully logged in via: ${endpoint}`);
           return echotikToken;
         } else {
-          console.warn(`Endpoint ${endpoint} returned success status but no token:`, response.data);
-          failedEndpoints.push(`${endpoint} (no token)`);
+          const detail = response ? JSON.stringify(response.data) : "No response";
+          console.warn(`Endpoint ${endpoint} failed structure check. Data: ${detail}`);
+          failedEndpoints.push(`${endpoint} (Invalid response structure)`);
         }
       } catch (error: any) {
         lastError = error;
@@ -97,7 +116,7 @@ async function getEchoTikToken() {
       }
     }
     
-    throw new Error(`EchoTik login failed on all endpoints: ${failedEndpoints.join(', ')}`);
+    throw new Error(`EchoTik login failed on all endpoints. Last error: ${lastError?.message}. Fetched from Vercel/Env: ${!!username}/${!!password}`);
   } catch (error: any) {
     console.error("EchoTik login failed:", error.message);
     throw error;
@@ -153,12 +172,24 @@ app.get("/api/leads", async (req, res) => {
       ? [
           "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
           "https://api-openapi.echotik.live/api/v1/shop/search",
-          "https://api-openapi.echotik.live/open/v1/shop/search"
+          "https://api-openapi.echotik.live/open/v1/shop/search",
+          "https://openapi.echotik.live/api/v1/openapi/shop/search",
+          "https://openapi.echotik.live/api/v1/shop/search",
+          "https://api.echotik.live/api/v1/openapi/shop/search",
+          "https://echotik.live/api/v1/openapi/shop/search",
+          "https://api-openapi.echotik.live/openapi/v1/shop/search",
+          "https://openapi.echotik.live/openapi/v1/shop/search"
         ]
       : [
           "https://api-openapi.echotik.live/api/v1/openapi/creator/search",
           "https://api-openapi.echotik.live/api/v1/creator/search",
-          "https://api-openapi.echotik.live/open/v1/creator/search"
+          "https://api-openapi.echotik.live/open/v1/creator/search",
+          "https://openapi.echotik.live/api/v1/openapi/creator/search",
+          "https://openapi.echotik.live/api/v1/creator/search",
+          "https://api.echotik.live/api/v1/openapi/creator/search",
+          "https://echotik.live/api/v1/openapi/creator/search",
+          "https://api-openapi.echotik.live/openapi/v1/creator/search",
+          "https://openapi.echotik.live/openapi/v1/creator/search"
         ];
 
     let lastError: any = null;

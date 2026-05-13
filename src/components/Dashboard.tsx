@@ -111,9 +111,14 @@ export default function Dashboard() {
             ECHOTIK PROSPECT <span className="font-normal opacity-40">v2.4</span>
           </h1>
           <div className="flex gap-6">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 group relative">
               <span className={`w-2 h-2 rounded-full ${error ? 'bg-red-500' : 'bg-green-600 animate-pulse'}`}></span>
               <span className="text-[10px] font-bold uppercase tracking-widest">{error ? 'API Offline' : 'API Connected'}</span>
+              {error && (
+                <div className="hidden group-hover:block absolute top-full left-0 mt-2 p-2 bg-[#141414] text-white text-[8px] font-mono whitespace-pre max-w-[400px] z-50 border border-white/20">
+                  {error}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 opacity-40">
               <span className="text-[10px] font-bold uppercase tracking-widest">Region: {region}</span>
