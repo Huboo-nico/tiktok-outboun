@@ -136,8 +136,14 @@ async function syncToSheets(data: any[]) {
     const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
     const sheetId = process.env.GOOGLE_SHEET_ID;
 
-    if (!serviceAccountEmail || !privateKey || !sheetId) {
-      throw new Error("Google Sheets configuration is incomplete (serviceAccountEmail, privateKey, or sheetId is missing).");
+    const missing = [
+      !serviceAccountEmail && "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+      !process.env.GOOGLE_PRIVATE_KEY && "GOOGLE_PRIVATE_KEY",
+      !sheetId && "GOOGLE_SHEET_ID"
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      throw new Error(`Google Sheets configuration is incomplete. Missing: ${missing.join(", ")}`);
     }
 
     const auth = new JWT({
@@ -197,51 +203,69 @@ app.get("/api/leads", async (req, res) => {
       ? [
           "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
           "https://openapi.echotik.live/api/v1/openapi/shop/search",
-          "https://api-openapi.echotik.live/openapi/v1/shop/search",
-          "https://openapi.echotik.live/openapi/v1/shop/search",
+          "https://api-openapi.echotik.live/api/v1/shop/search",
+          "https://api-openapi.echotik.live/api/v1/shop/list",
           "https://api.echotik.live/api/v1/openapi/shop/search"
         ]
       : [
           "https://api-openapi.echotik.live/api/v1/openapi/creator/search",
           "https://openapi.echotik.live/api/v1/openapi/creator/search",
-          "https://api-openapi.echotik.live/openapi/v1/creator/search",
-          "https://openapi.echotik.live/openapi/v1/creator/search",
+          "https://api-openapi.echotik.live/api/v1/influencer/search",
+          "https://api-openapi.echotik.live/api/v1/creator/list",
           "https://api.echotik.live/api/v1/openapi/creator/search"
         ];
 
     let lastError: any = null;
     for (const endpoint of endpoints) {
-      try {
-        console.log(`Searching EchoTik at: ${endpoint} (Region: ${region}, Type: ${type})`);
-        const headers: any = { 
-          'Content-Type': 'application/json',
-          'x-echotik-app-key': username,
-          'x-echotik-app-secret': password
-        };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
+      // Try both POST and GET for each endpoint as EchoTik versions vary
+      const methods = ["POST", "GET"];
+      
+      for (const method of methods) {
+        try {
+          console.log(`Searching EchoTik (${method}) at: ${endpoint} (Region: ${region}, Type: ${type})`);
+          const headers: any = { 
+            'Content-Type': 'application/json',
+            'x-echotik-app-key': username,
+            'x-echotik-app-secret': password
+          };
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
 
-        const response = await axios.get(endpoint, {
-          headers,
-          params: { region, page_size: 20 },
-          timeout: 10000
-        });
-        
-        if (response.data?.code !== 0 && response.data?.code !== undefined) {
-           console.warn(`API returned non-zero code on ${endpoint}:`, response.data);
-           if (response.data?.msg === "Oops, we've got a problem, please try again later.") {
-              continue;
-           }
-        }
+          const requestConfig: any = {
+            url: endpoint,
+            method: method,
+            headers: headers,
+            timeout: 10000
+          };
 
-        if (response.data && (response.data.data || response.data.list)) {
-          requestCount++; // Increment successful request count
-          return res.json(response.data);
+          if (method === "GET") {
+            requestConfig.params = { region, platform: 'TikTok', page_size: 20, pageSize: 20, page_num: 1, pageNo: 1, page_no: 1 };
+          } else {
+            requestConfig.data = { region, platform: 'TikTok', page_size: 20, pageSize: 20, page_num: 1, pageNo: 1, page_no: 1 };
+          }
+
+          const response = await axios(requestConfig);
+          
+          if (response.data?.code !== 0 && response.data?.code !== undefined) {
+             console.warn(`API returned code ${response.data.code} on ${endpoint} (${method}):`, response.data);
+             // 40001 or similar might mean wrong parameters or method
+             if (response.data?.msg === "Oops, we've got a problem, please try again later.") {
+                continue;
+             }
+          }
+
+          if (response.data && (response.data.data || response.data.list)) {
+            requestCount++; // Increment successful request count
+            return res.json(response.data);
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`${method} Search failed on ${endpoint}: ${err.message}`);
+          if (err.response?.data) {
+            console.warn("Response body:", JSON.stringify(err.response.data));
+          }
         }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Search failed on ${endpoint}: ${err.message}`);
       }
     }
 
@@ -277,6 +301,13 @@ app.get("/api/config-status", (req, res) => {
   res.json({
     echotik: !!(process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983'),
     googleSheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
+    missingSecrets: [
+      !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && 'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+      !process.env.GOOGLE_PRIVATE_KEY && 'GOOGLE_PRIVATE_KEY',
+      !process.env.GOOGLE_SHEET_ID && 'GOOGLE_SHEET_ID',
+      !process.env.ECHOTIK_APP_KEY && !process.env.ECHOTIK_USERNAME && 'ECHOTIK_APP_KEY',
+      !process.env.ECHOTIK_APP_SECRET && !process.env.ECHOTIK_PASSWORD && 'ECHOTIK_APP_SECRET'
+    ].filter(Boolean),
     serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
     requests: requestCount,
     maxRequests: MAX_REQUESTS

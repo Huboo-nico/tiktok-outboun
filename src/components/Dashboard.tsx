@@ -46,12 +46,14 @@ export default function Dashboard() {
     echotik: boolean; 
     googleSheets: boolean; 
     serviceAccountEmail: string | null;
+    missingSecrets: string[];
     requests: number;
     maxRequests: number;
   }>({
     echotik: false,
     googleSheets: false,
     serviceAccountEmail: null,
+    missingSecrets: [],
     requests: 0,
     maxRequests: 100
   });
@@ -234,7 +236,14 @@ export default function Dashboard() {
                 Para sincronizar con Sheets, debes:<br/>
                 1. Crear un Service Account en Google Cloud.<br/>
                 2. Compartir tu Sheet con el email de abajo.<br/>
-                3. Configurar GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL y GOOGLE_PRIVATE_KEY en Secrets.
+                3. Configurar en Secrets:<br/>
+                {config.missingSecrets.length > 0 ? (
+                  <span className="text-red-500 font-bold block mt-1">
+                    MISSING: {config.missingSecrets.join(', ')}
+                  </span>
+                ) : (
+                  <span className="text-green-600 font-bold block mt-1">✓ CONFIGURADO</span>
+                )}
               </p>
               <div className="p-2 bg-[#E4E3E0] border border-[#141414] text-[8px] font-mono break-all font-bold">
                 {config.serviceAccountEmail || 'PENDING_EMAIL_CONFIG'}
