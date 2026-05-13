@@ -56,6 +56,11 @@ async function getEchoTikToken() {
     throw new Error(`EchoTik credentials missing. ECHOTIK_APP_KEY/SECRET or ECHOTIK_USERNAME/PASSWORD needed.`);
   }
 
+  // Clear token if it's the trial account to ensure fresh login attempts
+  if (username === '260513461052475983' && !echotikToken) {
+    console.log("Using EchoTik Trial Account - enforcing fresh login");
+  }
+
   // Basic validation: EchoTik app secrets are typically hex strings or base64 and usually have a minimum length
   if (password.length < 16) {
     console.warn(`Warning: EchoTik secret seems suspiciously short (${password.length} chars).`);
@@ -240,9 +245,29 @@ app.get("/api/leads", async (req, res) => {
           };
 
           if (method === "GET") {
-            requestConfig.params = { region, platform: 'TikTok', page_size: 20, pageSize: 20, page_num: 1, pageNo: 1, page_no: 1 };
+            requestConfig.params = { 
+              region, 
+              platform: 'TikTok', 
+              page_size: 20, 
+              pageSize: 20, 
+              page_num: 1, 
+              pageNo: 1, 
+              page_no: 1,
+              keyword: '', 
+              q: ''
+            };
           } else {
-            requestConfig.data = { region, platform: 'TikTok', page_size: 20, pageSize: 20, page_num: 1, pageNo: 1, page_no: 1 };
+            requestConfig.data = { 
+              region, 
+              platform: 'TikTok', 
+              page_size: 20, 
+              pageSize: 20, 
+              page_num: 1, 
+              pageNo: 1, 
+              page_no: 1,
+              keyword: '',
+              q: ''
+            };
           }
 
           const response = await axios(requestConfig);
@@ -298,17 +323,24 @@ app.get("/api/health", (req, res) => {
 });
 
 app.get("/api/config-status", (req, res) => {
+  const gEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const gKey = process.env.GOOGLE_PRIVATE_KEY;
+  const gSheet = process.env.GOOGLE_SHEET_ID;
+  const eKey = process.env.ECHOTIK_APP_KEY || process.env.ECHOTIK_USERNAME;
+  const eSecret = process.env.ECHOTIK_APP_SECRET || process.env.ECHOTIK_PASSWORD;
+
+  const missing = [];
+  if (!gEmail) missing.push('GOOGLE_SERVICE_ACCOUNT_EMAIL');
+  if (!gKey) missing.push('GOOGLE_PRIVATE_KEY');
+  if (!gSheet) missing.push('GOOGLE_SHEET_ID');
+  if (!eKey) missing.push('ECHOTIK_APP_KEY/USERNAME');
+  if (!eSecret) missing.push('ECHOTIK_APP_SECRET/PASSWORD');
+
   res.json({
-    echotik: !!(process.env.ECHOTIK_USERNAME || process.env.ECHOTIK_APP_KEY || '260513461052475983'),
-    googleSheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
-    missingSecrets: [
-      !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && 'GOOGLE_SERVICE_ACCOUNT_EMAIL',
-      !process.env.GOOGLE_PRIVATE_KEY && 'GOOGLE_PRIVATE_KEY',
-      !process.env.GOOGLE_SHEET_ID && 'GOOGLE_SHEET_ID',
-      !process.env.ECHOTIK_APP_KEY && !process.env.ECHOTIK_USERNAME && 'ECHOTIK_APP_KEY',
-      !process.env.ECHOTIK_APP_SECRET && !process.env.ECHOTIK_PASSWORD && 'ECHOTIK_APP_SECRET'
-    ].filter(Boolean),
-    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
+    echotik: !!(eKey || '260513461052475983'),
+    googleSheets: !!(gEmail && gKey && gSheet),
+    missingSecrets: missing,
+    serviceAccountEmail: gEmail || (missing.includes('GOOGLE_SERVICE_ACCOUNT_EMAIL') ? null : 'Configured but empty'),
     requests: requestCount,
     maxRequests: MAX_REQUESTS
   });
