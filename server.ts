@@ -51,7 +51,9 @@ async function getEchoTikToken() {
       "https://api-openapi.echotik.live/auth/login",
       "https://api-openapi.echotik.live/open/v1/auth/login",
       "https://openapi.echotik.live/api/v1/auth/login",
-      "https://api.echotik.live/api/v1/openapi/auth/login"
+      "https://api.echotik.live/api/v1/openapi/auth/login",
+      "https://openapi.echotik.live/api/v1/openapi/auth/login",
+      "https://echotik.live/api/v1/openapi/auth/login"
     ];
 
     let lastError: any = null;
@@ -59,12 +61,26 @@ async function getEchoTikToken() {
     for (const endpoint of endpoints) {
       try {
         console.log(`Trying EchoTik login at: ${endpoint}`);
-        const response = await axios.post(endpoint, { username, password }, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 5000
-        });
+        // Try both common payload formats
+        const payloads = [
+          { username, password },
+          { app_key: username, app_secret: password }
+        ];
+
+        let response: any = null;
+        for (const payload of payloads) {
+          try {
+            response = await axios.post(endpoint, payload, {
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 5000
+            });
+            if (response.data && response.data.data && response.data.data.token) break;
+          } catch (e) {
+            // continue to next payload
+          }
+        }
         
-        if (response.data && response.data.data && response.data.data.token) {
+        if (response && response.data && response.data.data && response.data.data.token) {
           echotikToken = response.data.data.token;
           tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
           console.log(`Successfully logged in via: ${endpoint}`);
@@ -186,13 +202,27 @@ app.get("/api/config-status", (req, res) => {
   });
 });
 
+export default app; // Export for Vercel
+
 async function start() {
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production";
+  const isVercel = process.env.VERCEL === "1";
+
+  if (isVercel) {
+    console.log("Running in Vercel environment");
+    return;
+  }
+
+  console.log(`Starting server in ${isProd ? "production" : "development"} mode...`);
+
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
+      root: process.cwd(),
     });
     app.use(vite.middlewares);
+    console.log("Vite middleware initialized");
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -202,8 +232,10 @@ async function start() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server listening on 0.0.0.0:${PORT}`);
   });
 }
 
-start();
+if (process.env.VERCEL !== "1") {
+  start();
+}

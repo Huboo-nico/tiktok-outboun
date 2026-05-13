@@ -8,7 +8,7 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     optimizeDeps: {
-      exclude: ['google-spreadsheet', 'google-auth-library', 'express', 'module'],
+      exclude: [],
     },
     build: {
       rollupOptions: {
