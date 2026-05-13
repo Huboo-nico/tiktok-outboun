@@ -1,0 +1,8 @@
+{
+  "name": "EchoLead: TikTok Shop B2B Prospección",
+  "description": "Sistema automatizado para extraer datos de TikTok Shop y Creators de EchoTik, sincronizado con Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
