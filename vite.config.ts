@@ -7,8 +7,13 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    optimizeDeps: {
+      exclude: ['google-spreadsheet', 'google-auth-library', 'express', 'module'],
+    },
+    build: {
+      rollupOptions: {
+        external: ['google-spreadsheet', 'google-auth-library', 'express', 'module'],
+      },
     },
     resolve: {
       alias: {

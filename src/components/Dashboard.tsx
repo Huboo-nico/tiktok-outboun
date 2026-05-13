@@ -42,6 +42,20 @@ export default function Dashboard() {
   const [region, setRegion] = useState('ES');
   const [type, setType] = useState('shop');
   const [error, setError] = useState<string | null>(null);
+  const [config, setConfig] = useState<{ echotik: boolean; googleSheets: boolean; serviceAccountEmail: string | null }>({
+    echotik: false,
+    googleSheets: false,
+    serviceAccountEmail: null
+  });
+
+  const fetchConfig = async () => {
+    try {
+      const response = await axios.get('/api/config-status');
+      setConfig(response.data);
+    } catch (err) {
+      console.error("Error checking config status", err);
+    }
+  };
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -84,6 +98,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    fetchConfig();
     fetchLeads();
   }, [region, type]);
 
@@ -107,6 +122,12 @@ export default function Dashboard() {
         </div>
         
         <div className="flex gap-2">
+          {!config.googleSheets && (
+            <div className={`px-4 py-2 border border-dashed border-[#141414] text-[9px] font-bold uppercase flex flex-col justify-center leading-tight max-w-[200px]`}>
+              <span className="text-red-500">Sheets Config Missing</span>
+              <span className="opacity-40 text-[7px] truncate">{config.serviceAccountEmail || 'No Service Account Email'}</span>
+            </div>
+          )}
           <button 
             onClick={fetchLeads}
             disabled={loading}
@@ -166,6 +187,21 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
+
+          {!config.googleSheets && (
+            <div className="p-4 border border-[#141414] bg-white space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Setup Required</p>
+              <p className="text-[9px] leading-relaxed opacity-70">
+                Para sincronizar con Sheets, debes:<br/>
+                1. Crear un Service Account en Google Cloud.<br/>
+                2. Compartir tu Sheet con el email de abajo.<br/>
+                3. Configurar GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL y GOOGLE_PRIVATE_KEY en Secrets.
+              </p>
+              <div className="p-2 bg-[#E4E3E0] border border-[#141414] text-[8px] font-mono break-all font-bold">
+                {config.serviceAccountEmail || 'PENDING_EMAIL_CONFIG'}
+              </div>
+            </div>
+          )}
 
           <div className="mt-auto p-4 bg-[#141414] text-[#E4E3E0] rounded-sm">
             <p className="text-[9px] uppercase tracking-[0.2em] mb-2 font-bold flex items-center gap-2">

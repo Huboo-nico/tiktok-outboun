@@ -3,11 +3,24 @@ import path from "path";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
-import { GoogleSpreadsheet } from "google-spreadsheet";
-import { JWT } from "google-auth-library";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Lazily load Google libraries to avoid issues during startup/bundling
+let GoogleSpreadsheet: any;
+let JWT: any;
+
+async function loadGoogleLibs() {
+  if (!GoogleSpreadsheet || !JWT) {
+    const { createRequire } = await import("module");
+    const require = createRequire(import.meta.url);
+    const gs = require("google-spreadsheet");
+    const gal = require("google-auth-library");
+    GoogleSpreadsheet = gs.GoogleSpreadsheet;
+    JWT = gal.JWT;
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -15,8 +28,7 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
-// --- EchoTik Service Logic ---
-
+// --- EchoTik Service Logic --- (unchanged but using axios)
 let echotikToken: string | null = null;
 let tokenExpiry: number = 0;
 
@@ -33,26 +45,53 @@ async function getEchoTikToken() {
   }
 
   try {
-    // Note: Assuming login endpoint based on common patterns. 
-    // In a real scenario, this would be the actual EchoTik login URL.
-    const response = await axios.post("https://api-openapi.echotik.live/api/v1/auth/login", {
-      username,
-      password
-    });
+    const endpoints = [
+      "https://api-openapi.echotik.live/api/v1/openapi/auth/login",
+      "https://api-openapi.echotik.live/api/v1/auth/login",
+      "https://api-openapi.echotik.live/auth/login",
+      "https://api-openapi.echotik.live/open/v1/auth/login",
+      "https://openapi.echotik.live/api/v1/auth/login",
+      "https://api.echotik.live/api/v1/openapi/auth/login"
+    ];
+
+    let lastError: any = null;
+    let failedEndpoints: string[] = [];
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Trying EchoTik login at: ${endpoint}`);
+        const response = await axios.post(endpoint, { username, password }, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000
+        });
+        
+        if (response.data && response.data.data && response.data.data.token) {
+          echotikToken = response.data.data.token;
+          tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+          console.log(`Successfully logged in via: ${endpoint}`);
+          return echotikToken;
+        } else {
+          console.warn(`Endpoint ${endpoint} returned success status but no token:`, response.data);
+          failedEndpoints.push(`${endpoint} (no token)`);
+        }
+      } catch (error: any) {
+        lastError = error;
+        const status = error.response?.status;
+        console.warn(`Failed endpoint ${endpoint}: ${error.message}${status ? ` (status: ${status})` : ''}`);
+        failedEndpoints.push(`${endpoint} (${status || error.message})`);
+      }
+    }
     
-    echotikToken = response.data.data.token;
-    // Set expiry to 23 hours later (or whatever the API specifies)
-    tokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
-    return echotikToken;
-  } catch (error) {
-    console.error("EchoTik login failed:", error);
+    throw new Error(`EchoTik login failed on all endpoints: ${failedEndpoints.join(', ')}`);
+  } catch (error: any) {
+    console.error("EchoTik login failed:", error.message);
     throw error;
   }
 }
 
 // --- Google Sheets Service Logic ---
-
 async function syncToSheets(data: any[]) {
+  await loadGoogleLibs();
+  
   const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
   const sheetId = process.env.GOOGLE_SHEET_ID;
@@ -73,16 +112,13 @@ async function syncToSheets(data: any[]) {
   
   const sheet = doc.sheetsByIndex[0];
   
-  // Clear and add headers if empty, or just append
   const rows = data.map(item => ({
-    "Nombre": item.nickname || item.name,
-    "Handle": item.unique_id || item.handle,
-    "URL": `https://www.tiktok.com/@${item.unique_id || item.handle}`,
-    "País": item.region || item.country,
-    "Followers": item.follower_count || 0,
-    "Engagement Rate": item.engagement_rate || 0,
-    "Ventas Estimadas": item.monthly_sales || 0,
-    "Revenue": item.monthly_revenue || 0,
+    "Nombre": item.name,
+    "Handle": item.handle,
+    "URL": `https://www.tiktok.com/@${item.handle}`,
+    "País": item.country,
+    "Followers": item.followers || 0,
+    "Revenue": item.revenue || 0,
     "Categoría": item.category || "N/A",
     "Email": item.email || "N/A",
     "Última Actualización": new Date().toISOString()
@@ -91,25 +127,43 @@ async function syncToSheets(data: any[]) {
   await sheet.addRows(rows);
 }
 
-// --- API Routes ---
-
+// ... rest of API routes ...
 app.get("/api/leads", async (req, res) => {
   try {
     const { region = "ES", type = "shop" } = req.query;
     const token = await getEchoTikToken();
     
-    // Example endpoint for shops or creators
-    const endpoint = type === "shop" 
-      ? "https://api-openapi.echotik.live/api/v1/shop/search"
-      : "https://api-openapi.echotik.live/api/v1/creator/search";
+    const endpoints = type === "shop" 
+      ? [
+          "https://api-openapi.echotik.live/api/v1/openapi/shop/search",
+          "https://api-openapi.echotik.live/api/v1/shop/search",
+          "https://api-openapi.echotik.live/open/v1/shop/search"
+        ]
+      : [
+          "https://api-openapi.echotik.live/api/v1/openapi/creator/search",
+          "https://api-openapi.echotik.live/api/v1/creator/search",
+          "https://api-openapi.echotik.live/open/v1/creator/search"
+        ];
 
-    const response = await axios.get(endpoint, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: { region, page_size: 20 }
-    });
+    let lastError: any = null;
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Searching EchoTik at: ${endpoint}`);
+        const response = await axios.get(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { region, page_size: 20 },
+          timeout: 10000
+        });
+        return res.json(response.data);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Search failed on ${endpoint}: ${err.message}`);
+      }
+    }
 
-    res.json(response.data);
+    throw lastError;
   } catch (error: any) {
+    console.error("Leads search failed:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -124,7 +178,13 @@ app.post("/api/sync", async (req, res) => {
   }
 });
 
-// --- Vite Middleware ---
+app.get("/api/config-status", (req, res) => {
+  res.json({
+    echotik: !!(process.env.ECHOTIK_USERNAME && process.env.ECHOTIK_PASSWORD),
+    googleSheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
+    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null
+  });
+});
 
 async function start() {
   if (process.env.NODE_ENV !== "production") {
